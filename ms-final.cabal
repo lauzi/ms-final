@@ -23,4 +23,5 @@ executable ms-final
                        array,
                        random,
                        deepseq
-  other-modules:       MyRandom
+  other-modules:       MyRandom,
+                       Image

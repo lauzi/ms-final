@@ -6,66 +6,13 @@ import Data.List (mapAccumL, intercalate)
 import Data.Tuple (swap)
 import Data.Array.IArray
 import Text.Printf
-import System.IO (IOMode(WriteMode), withFile)
 import System.Random (StdGen, mkStdGen)
 import Control.Monad
-import Control.DeepSeq
-import Control.Exception (assert)
-import qualified Data.ByteString.Lazy.Char8 as C
 
+import Image
 import MyRandom (shuffleN)
 
 import Debug.Trace
-
-
-type IntMat = Array (Int, Int) Int
-
-data Image = Image
-  { imgHeight :: Int
-  , imgWidth :: Int
-  , imgPixels :: IntMat
-  } deriving (Show, Eq)
-
-
-safeParseP5 :: C.ByteString -> Maybe Image
-safeParseP5 bs = parse' . words . removeComments . C.unpack $ bs
-  where
-    removeComments = unlines . removeComment . lines
-    removeComment = map $ takeWhile (/= '#')
-
-    takeEnd n xs = C.drop (C.length xs - n) xs
-
-    parse' (magic : hstr : wstr : maxValue : _) = do
-      guard $ magic == "P5"
-      guard $ read maxValue == (255 :: Int)
-      let
-        [h, w] = map read [hstr, wstr]
-        raster = takeEnd (fromIntegral (h*w)) bs
-        toArr = listArray ((1, 1), (h, w))
-        parseRaster = toArr . map fromEnum . C.unpack
-      return $ Image h w (parseRaster raster)
-    parse' _ = Nothing
-
-parseP5 :: C.ByteString -> Image
-parseP5 = maybe (error "Failed to parse image") id . safeParseP5
-
-
-groupOf :: Int -> [a] -> [[a]]
-groupOf n = go
-  where
-    go [] = []
-    go xs = let (ys, zs) = splitAt n xs in ys : go zs
-
-saveP5 :: FilePath -> Image -> IO ()
-saveP5 fileName (Image height width pxls) =
-  withFile fileName WriteMode $ \h -> do
-    C.hPut h . C.pack . unlines $
-      [ "P5"
-      , printf "%d %d" height width
-      , "255"
-      , ""]
-    C.hPut h . C.pack . map toEnum . elems $ pxls
-
 
 calcGAP :: Image -> IntMat
 calcGAP (Image h w pxls) = listArray bounds' $ map gap (range bounds')
@@ -119,17 +66,8 @@ calcErrorEnergy (Image h w pxls) errs =
       | j <= 0 = 0
       | otherwise = errs ! p
 
-{-
-    ee (i, j) = trace (unwords $ map (printf "%4d")
-                       [i, j,
-                        dh, dv, getError (i, j-1),
-                        get (i, j-1), res]) res
-
---}
-    ee (i, j) = res
+    ee (i, j) = dh + dv + 2 * abs (getError (i, j-1))
       where
-        res = dh + dv + 2 * abs (getError (i, j-1))
-
         get' (x, y) = get (x+i, y+j)
         [inn, inne, inw, in', ine, iww, iw] = map get' neighbors
         dv = sum $ map abs [iw - inw, in' - inn, ine - inne]
@@ -148,8 +86,8 @@ mappedError i i'
 -- When i' >= 128,
 --      e' = mappedError i i' = mappedError (255-i) (255-i'),
 --      unmapError (mappedError (255-i) (255-i')) (255-i') = (255-i) - (255-i')
---   => unmapError e' (255-i') = i' - i.
---   Hence unmapError e' i' = i - i' = negate $ unmapError e' (255-i').
+--   => unmapError e' (255-i') = i' - i
+--   => unmapError e' i' = i - i' = negate $ unmapError e' (255-i').
 unmapError :: Int -> Int -> Int
 unmapError e' i'
   | i' >= 128   = negate $ unmapError e' (255-i')
@@ -183,10 +121,10 @@ restorePixels img@(Image h w _) preds initArr =
         qv = q (ee ! p)
         e' = head (arr !! qv)
         e = unmapError e' i'
-        arr' = fuckit qv arr
+        arr' = popNthBin qv arr
 
-fuckit :: Int -> [[a]] -> [[a]]
-fuckit n xss =
+popNthBin :: Int -> [[a]] -> [[a]]
+popNthBin n xss =
   let (yss, (_:xs) : zss) = splitAt n xss
   in yss ++ (xs : zss)
 
@@ -303,7 +241,7 @@ printHistogram h = forM_ (assocs h) $ \(x, y) ->
 
 main :: IO ()
 main = do
-  lena <- parseP5 <$> C.readFile (assert False "lena512.pgm")
+  lena <- readP5 "lena512.pgm"
 
   when False $ do
     putStrLn "Remapped Errors:"
@@ -331,4 +269,4 @@ main = do
     printf "Size: %s\n" $ show (size' blk)
     putStrLn . format . take 8 $ elems blk
 
-  saveP5 "lena_out.pgm" . fromFile g . force . toFile g $ lena
+  writeP5 "lena_out.pgm" . fromFile g . toFile g $ lena
