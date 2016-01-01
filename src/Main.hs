@@ -3,7 +3,7 @@
 
 module Main where
 
-import Data.List (mapAccumL, intercalate)
+import Data.List (mapAccumL, intercalate, isSuffixOf)
 import Data.Tuple (swap)
 import Data.Array.IArray
 import Text.Printf
@@ -18,6 +18,9 @@ import GHC.Generics (Generic)
 
 import Image
 import MyRandom (shuffleN)
+
+import System.Environment (getArgs)
+
 
 import Debug.Trace
 
@@ -266,8 +269,8 @@ printHistogram h = forM_ (assocs h) $ \(x, y) ->
   when (y > 0) $ printf "%4d -> %4d\n" x y
 
 
-main :: IO ()
-main = do
+testShit :: IO ()
+testShit = do
   lena <- readP5 "lena512.pgm"
 
   when False $ do
@@ -297,3 +300,31 @@ main = do
     putStrLn . format . take 8 $ elems blk
 
   writeP5 "lena_out.pgm" . decryptImage g . force . encryptImage g $ lena
+
+
+main :: IO ()
+main = do
+  args <- getArgs
+
+  if length args >= 3
+    then endecodeFile (read (args !! 0)) (args !! 1) (args !! 2)
+    else printUsage
+
+endecodeFile :: Int -> String -> String -> IO ()
+endecodeFile gSeed inputFile outputFile =
+  if isSuffixOf ".pgm" inputFile
+  then do
+    img <- readP5 inputFile
+    writeSafeFormat outputFile (encryptImage g img)
+  else do
+    enc <- readSafeFormat inputFile
+    writeP5 outputFile (decryptImage g enc)
+  where g = mkStdGen gSeed
+
+printUsage :: IO ()
+printUsage = do
+  putStrLn "Usage: ms-final key input-file output-file"
+  putStrLn "  The parameter `key` is an Int."
+  putStrLn ""
+  putStrLn "  If the input file ends with .pgm, then the file is encrypted, "
+  putStrLn "  else the file is decrypted."
