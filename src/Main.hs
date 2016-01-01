@@ -89,7 +89,7 @@ mappedError i i'
   | otherwise = e + i'
   where e = i - i'
 
--- Definition: unmapError (mappedError i i') = i - i'
+-- Definition: unmapError (mappedError i i') i' = i - i'
 -- When i' >= 128,
 --      e' = mappedError i i' = mappedError (255-i) (255-i'),
 --      unmapError (mappedError (255-i) (255-i')) (255-i') = (255-i) - (255-i')
