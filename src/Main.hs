@@ -1,3 +1,4 @@
+{-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE PartialTypeSignatures #-}
 
 module Main where
@@ -14,64 +15,64 @@ import MyRandom (shuffleN)
 
 import Debug.Trace
 
-calcGAP :: Image -> IntMat
-calcGAP (Image h w pxls) = listArray bounds' $ map gap (range bounds')
+type GradMat = Array (Int, Int) (Int, Int)
+
+calcGradGAP :: Image -> (GradMat, IntMat)
+calcGradGAP (Image h w pxls) =
+  (listArray bounds' grads, listArray bounds' gaps)
   where
+    (grads, gaps) = unzip $ map gradGAP (range bounds')
     bounds' = ((1, 1), (h, w))
 
     get p
       | not (inRange bounds' p) = 0
       | otherwise = pxls ! p
 
-    gap (i, j)
-      | dvh >  80 = iw
-      | dvh < -80 = in'
-      | dvh >  32 = (ic +  iw) `div` 2
-      | dvh < -32 = (ic + in') `div` 2
-      | dvh >   8 = (3 * ic +  iw) `div` 4
-      | dvh <  -8 = (3 * ic + in') `div` 4
-      | otherwise = ic
+    gradGAP (i, j) = ((dv, dh), gap)
       where
         get' (x, y) = get (x+i, y+j)
+
         [inn, inne, inw, in', ine, iww, iw] = map get' neighbors
         dv = sum $ map abs [iw - inw, in' - inn, ine - inne]
         dh = sum $ map abs [iw - iww, in' - inw, in' -  ine]
         dvh = dv - dh
         ic = (iw + in') `div` 2 + (ine - inw) `div` 4
 
+        gap
+          | dvh <= 8 && dvh >= -8 = ic
+          | dvh >  80 = iw
+          | dvh < -80 = in'
+          | dvh >  32 = (ic +  iw) `div` 2
+          | dvh < -32 = (ic + in') `div` 2
+          | dvh >   8 = (3 * ic +  iw) `div` 4
+          | dvh <  -8 = (3 * ic + in') `div` 4
+          | otherwise = error "calcGradGAP.gap: GGWP"
+
 neighbors :: [(Int, Int)]
 neighbors = [           (-2, 0), (-2, 1),
               (-1, -1), (-1, 0), (-1, 1),
      (0, -2), ( 0, -1)]
 
-predictErrors :: Image -> IntMat -> IntMat
-predictErrors (Image h w pxls) gap =
+predictionErrors :: Image -> IntMat -> IntMat
+predictionErrors (Image h w pxls) gap =
   listArray bounds' $ zipWith (-) origs preds
   where
     bounds' = ((1, 1), (h, w))
     origs = elems pxls
     preds = elems gap
 
-calcErrorEnergy :: Image -> IntMat -> IntMat
-calcErrorEnergy (Image h w pxls) errs =
+calcErrorEnergy :: GradMat -> IntMat -> IntMat
+calcErrorEnergy grads errs =
   listArray bounds' $ map ee (range bounds')
   where
-    bounds' = ((1, 1), (h, w))
-
-    get p
-      | not (inRange bounds' p) = 0
-      | otherwise = pxls ! p
+    bounds' = bounds grads
 
     getError p@(_, j)
       | j <= 0 = 0
       | otherwise = errs ! p
 
     ee (i, j) = dh + dv + 2 * abs (getError (i, j-1))
-      where
-        get' (x, y) = get (x+i, y+j)
-        [inn, inne, inw, in', ine, iww, iw] = map get' neighbors
-        dv = sum $ map abs [iw - inw, in' - inn, ine - inne]
-        dh = sum $ map abs [iw - iww, in' - inw, in' -  ine]
+      where (dh, dv) = grads ! (i, j)
 
 -- imagePixel -> gapPrediction -> mappedError
 mappedError :: Int -> Int -> Int
@@ -95,21 +96,21 @@ unmapError e' i'
   | even e'     = negate (e' `div` 2)
   | otherwise   = (e'+1) `div` 2
 
-remappedErrors :: Image -> IntMat
-remappedErrors img@(Image h w pxls) =
+remappedErrors :: Image -> IntMat -> IntMat
+remappedErrors (Image h w pxls) predMat =
   listArray bounds' $ zipWith mappedError origs preds
   where
     bounds' = ((1, 1), (h, w))
     origs = elems pxls
-    preds = elems $ calcGAP img
+    preds = elems predMat
 
 
-restorePixels :: Image -> IntMat -> Array Int [Int] -> IntMat
-restorePixels img@(Image h w _) preds initArr =
+restorePixels :: (GradMat, IntMat) -> Array Int [Int] -> IntMat
+restorePixels (grads, preds) initArr =
   listArray bounds' $ zipWith (+) (elems preds) errs
   where
-    bounds' = ((1, 1), (h, w))
-    ee = calcErrorEnergy img $ listArray bounds' errs
+    bounds' = bounds grads
+    ee = calcErrorEnergy grads $ listArray bounds' errs
     errs = go (elems initArr) (range bounds')
 
     q = quantizer defaultBins
@@ -190,8 +191,10 @@ blocksToFile = concatMap cm
 toFile :: StdGen -> Image -> [Int]
 toFile g img = imgHeight img : imgWidth img : blocksToFile blocks'
   where
-    ees = calcErrorEnergy img (predictErrors img (calcGAP img))
-    blocks = partitionErrors (quantizer defaultBins) (remappedErrors img) ees
+    (grads, preds) = calcGradGAP img
+    ees = calcErrorEnergy grads (predictionErrors img preds)
+    err's = remappedErrors img preds
+    blocks = partitionErrors (quantizer defaultBins) err's ees
     blocks' = snd $ shuffleBlocks g blocks
 
 fromFile :: StdGen -> [Int] -> Image
@@ -214,8 +217,8 @@ buildImage h w blks' = img
     blks = listArray (0, length blks' - 1) blks'
 
     img = Image h w pxls
-    pxls = restorePixels img preds blks
-    preds = calcGAP img
+    pxls = restorePixels (grads, preds) blks
+    (grads, preds) = calcGradGAP img
 
 
 -- Testing purposes only
@@ -245,10 +248,13 @@ main = do
 
   when False $ do
     putStrLn "Remapped Errors:"
-    printHistogram . histogram . elems $ remappedErrors lena
+    printHistogram . histogram . elems $
+      remappedErrors lena (snd $ calcGradGAP lena)
     putStrLn ""
 
-  let ees = calcErrorEnergy lena (predictErrors lena (calcGAP lena))
+  let
+    (grads, preds) = calcGradGAP lena
+    ees = calcErrorEnergy grads (predictionErrors lena preds)
 
   when False $ do
     putStrLn "Error Energy Estimations:"
@@ -257,7 +263,8 @@ main = do
 
   let
     g = mkStdGen 100000009
-    blocks = partitionErrors (quantizer defaultBins) (remappedErrors lena) ees
+    err's = remappedErrors lena preds
+    blocks = partitionErrors (quantizer defaultBins) err's ees
     blocks' = snd $ shuffleBlocks g blocks
 
     format = intercalate ", " . map (printf "%3d")
