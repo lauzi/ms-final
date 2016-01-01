@@ -1,3 +1,8 @@
 .stack-work
 .DS_Store
 *out.pgm
+
+*.aux
+*.hp
+*.prof
+*.ps
