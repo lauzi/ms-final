@@ -328,3 +328,6 @@ printUsage = do
   putStrLn ""
   putStrLn "  If the input file ends with .pgm, then the file is encrypted, "
   putStrLn "  else the file is decrypted."
+  putStrLn ""
+  putStrLn "Example:"
+  putStrLn "  ms-final 100000009 lena512.pgm lena.wtf"
