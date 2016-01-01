@@ -22,6 +22,7 @@ executable ms-final
                        bytestring,
                        array,
                        random,
-                       deepseq
+                       deepseq,
+                       binary
   other-modules:       MyRandom,
                        Image

@@ -1,4 +1,5 @@
 {-# LANGUAGE PartialTypeSignatures #-}
+{-# LANGUAGE DeriveGeneric, DeriveAnyClass #-}
 
 module Main where
 
@@ -8,6 +9,12 @@ import Data.Array.IArray
 import Text.Printf
 import System.Random (StdGen, mkStdGen)
 import Control.Monad
+import Control.DeepSeq
+
+import Data.Binary
+import qualified Data.ByteString.Lazy as BL
+
+import GHC.Generics (Generic)
 
 import Image
 import MyRandom (shuffleN)
@@ -182,30 +189,50 @@ shuffleBlocks :: StdGen -> [Block] -> (StdGen, [Block])
 shuffleBlocks = mapAccumL shuffleBlock
 
 
-blocksToFile :: [Block] -> [Int]
-blocksToFile = concatMap cm
-  where cm blk = (succ . snd . snd . bounds $ blk) : elems blk
+data SafeBin = SafeBin
+  { safeLength :: Int
+  , safeData   :: BL.ByteString
+  } deriving (Generic, Binary, NFData)
 
+packBlock :: Block -> SafeBin
+packBlock arr = SafeBin len content
+  where
+    len = succ . snd . snd . bounds $ arr
+    content = BL.pack . map toEnum $ elems arr
 
-toFile :: StdGen -> Image -> [Int]
-toFile g img = imgHeight img : imgWidth img : blocksToFile blocks'
+unpackBlock :: SafeBin -> Block
+unpackBlock (SafeBin len dat) = listArray ((0, 0), (3, len-1)) vals
+  where vals = map fromEnum . BL.unpack $ dat
+
+blocksToSafeBins :: [Block] -> [SafeBin]
+blocksToSafeBins = map packBlock
+
+data SafeFormat = SafeFormat
+  { safeHeight :: Int
+  , safeWidth  :: Int
+  , safeBins   :: [SafeBin]
+  } deriving (Generic, Binary, NFData)
+
+encryptImage :: StdGen -> Image -> SafeFormat
+encryptImage g img@(Image h w _) = SafeFormat h w (blocksToSafeBins blocks')
   where
     ees = calcErrorEnergy img (predictErrors img (calcGAP img))
     blocks = partitionErrors (quantizer defaultBins) (remappedErrors img) ees
     blocks' = snd $ shuffleBlocks g blocks
 
-fromFile :: StdGen -> [Int] -> Image
-fromFile g (h:w:xs) = buildImage h w $ groupBlocks g xs
-fromFile _ _ = error "File is too short"
+decryptImage :: StdGen -> SafeFormat -> Image
+decryptImage g (SafeFormat h w bins) = buildImage h w $ groupBlocks g bins
+
+readSafeFormat :: FilePath -> IO SafeFormat
+readSafeFormat = fmap decode . BL.readFile
+
+writeSafeFormat :: FilePath -> SafeFormat -> IO ()
+writeSafeFormat = (. encode) . BL.writeFile
 
 
-groupBlocks :: StdGen -> [Int] -> [[Int]]
-groupBlocks _ [] = []
-groupBlocks g (len:xs) = block : groupBlocks g' zs
-  where
-    (ys, zs) = splitAt (len*4) xs
-    shuffledBlock = listArray ((0, 0), (3, len-1)) ys
-    (g', block) = elems <$> deshuffleBlock g shuffledBlock
+groupBlocks :: StdGen -> [SafeBin] -> [[Int]]
+groupBlocks = (snd .) . mapAccumL mac
+  where mac g bin = elems <$> deshuffleBlock g (unpackBlock bin)
 
 
 buildImage :: Int -> Int -> [[Int]] -> Image
@@ -269,4 +296,4 @@ main = do
     printf "Size: %s\n" $ show (size' blk)
     putStrLn . format . take 8 $ elems blk
 
-  writeP5 "lena_out.pgm" . fromFile g . toFile g $ lena
+  writeP5 "lena_out.pgm" . decryptImage g . force . encryptImage g $ lena
