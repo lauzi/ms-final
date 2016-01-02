@@ -3,11 +3,11 @@
 
 module Main where
 
-import Data.List (mapAccumL, intercalate, isSuffixOf)
+import Data.List (mapAccumL, intercalate, isSuffixOf, unfoldr)
 import Data.Tuple (swap)
 import Data.Array.IArray
 import Text.Printf
-import System.Random (StdGen, mkStdGen)
+import System.Random (StdGen, mkStdGen, randomR)
 import Control.Monad
 import Control.DeepSeq
 
@@ -120,7 +120,28 @@ restorePixels img@(Image h w _) preds initArr =
   where
     bounds' = ((1, 1), (h, w))
     ee = calcErrorEnergy img $ listArray bounds' errs
-    errs = go (elems initArr) (range bounds')
+    errs = go (map repeatAvg $ elems initArr) (range bounds')
+    {-
+    errs = map bound . zipWith (+) noises $
+      go (map repeatAvg $ elems initArr) (range bounds')
+    -}
+    bound = max (-255) . min 255
+    fuckdebug = fucktrace
+      (filter ((/=) 0 . snd) . zip [0..] . take 1024)
+
+    repeatAvg xs = xs ++ repeat (average xs)
+    noises = fuckdebug $
+      take 1024 (unfoldr noiseFolder (mkStdGen 19930423)) ++ repeat 0
+    noiseFolder g = Just $
+      if fuckThisShit
+      then (wtf, g'')
+      else (0, g')
+      where
+        (g', fuckThisShit) = (==) (0::Int) <$> swap (randomR (0, 99) g)
+        (g'', wtf) = f <$> swap (randomR (-epsilon, epsilon) g')
+        f = id
+        -- f = (*) 2 . (`div`) 2
+        epsilon = 4 :: Int
 
     q = quantizer defaultBins
 
@@ -287,7 +308,8 @@ testShit = do
 
   let
     g = mkStdGen 100000009
-    blocks = partitionErrors (quantizer defaultBins) (remappedErrors lena) ees
+    q = quantizer defaultBins
+    blocks = partitionErrors q (remappedErrors lena) ees
     blocks' = snd $ shuffleBlocks g blocks
 
     format = intercalate ", " . map (printf "%3d")
