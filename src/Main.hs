@@ -306,9 +306,13 @@ main :: IO ()
 main = do
   args <- getArgs
 
-  if length args >= 3
-    then endecodeFile (read (args !! 0)) (args !! 1) (args !! 2)
-    else printUsage
+  let
+    exec
+      | length args >= 1 && head args == "test" = testShit
+      | length args >= 3 =
+        endecodeFile (read (args !! 0)) (args !! 1) (args !! 2)
+      | otherwise = printUsage
+  exec
 
 endecodeFile :: Int -> String -> String -> IO ()
 endecodeFile gSeed inputFile outputFile =
@@ -324,6 +328,8 @@ endecodeFile gSeed inputFile outputFile =
 printUsage :: IO ()
 printUsage = do
   putStrLn "Usage: ms-final key input-file output-file"
+  putStrLn "       ms-final test"
+  putStrLn ""
   putStrLn "  The parameter `key` is an Int."
   putStrLn ""
   putStrLn "  If the input file ends with .pgm, then the file is encrypted, "
