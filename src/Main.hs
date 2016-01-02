@@ -120,7 +120,10 @@ restorePixels img@(Image h w _) preds initArr =
   where
     bounds' = ((1, 1), (h, w))
     ee = calcErrorEnergy img $ listArray bounds' errs
-    errs = go (elems initArr) (range bounds')
+    errs = go (initBins initArr) (range bounds')
+
+    initBins = map appendAverages . elems
+    appendAverages xs = xs ++ repeat (average xs)
 
     q = quantizer defaultBins
 
